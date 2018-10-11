@@ -1,0 +1,451 @@
+<!-- Assignment 4 Custom Shader, Jared Johansson -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8"></meta>
+    <title>Assignment 4</title>
+
+    <!-- ALL IMPORTS -->
+    <script type="text/javascript"
+      src="https://threejs.org/build/three.js"></script>
+    <script type="text/javascript"
+      src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
+
+    <!--Gui and stat tracking -->
+    <script type="text/javascript"
+      src="https://threejs.org/examples/js/libs/dat.gui.min.js"></script>
+    <script type="text/javascript"
+      src="https://rawgit.com/mrdoob/stats.js/master/build/stats.min.js"></script>
+
+    <!-- Multi Mesh object -->
+    <script type="text/javascript"
+      src="https://threejs.org/examples/js/utils/SceneUtils.js"></script>
+
+    <!-- Postprocessing shading -->
+    <script type="text/javascript"
+      src="https://threejs.org/examples/js/postprocessing/EffectComposer.js"></script>
+    <script type="text/javascript"
+      src="https://threejs.org/examples/js/postprocessing/RenderPass.js"></script>
+    <script type="text/javascript"
+      src="https://threejs.org/examples/js/shaders/CopyShader.js"></script>
+    <!-- <script type="text/javascript" src="https://threejs.org/examples/js/postprocessing/MaskPass.js"></script> -->
+    <script type="text/javascript"
+      src="https://threejs.org/examples/js/postprocessing/ShaderPass.js"></script>
+
+    <!-- Scene wide custom shaders -->
+    <script type="text/javascript"
+      src="customShader-ColorChange.js"></script>
+    <script type="text/javascript"
+      src="customShader-BitChange.js"></script>
+
+    <!-- Raw shader material -->
+    <script id="normalVertexShader" type="x-shader/x-vertex">
+      precision highp float;
+
+      attribute vec3 position;
+      attribute vec3 normal;
+
+      uniform mat4 modelViewMatrix;
+      uniform mat4 projectionMatrix;
+      uniform mat3 normalMatrix;
+
+      // varying can be assigned different values (float)
+      varying vec3 vNormal;
+
+      void main()
+      {
+        vNormal = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0 );
+      }
+    </script>
+
+    <script id="normalFragmentShader" type="x-shader/x-fragment">
+      precision highp float;
+
+      varying vec3 vNormal;
+
+      void main()	{
+        vec3 mattColor = (normalize(vNormal) + 1.0) / 2.0;
+        gl_FragColor = vec4(mattColor,1.0);
+      }
+    </script>
+
+    <script id="customVertexShader" type="x-shader/x-vertex">
+      precision highp float;
+
+      attribute vec3 position;
+      attribute vec3 normal;
+      attribute vec2 uv;
+
+      uniform mat4 modelViewMatrix;
+      uniform mat4 projectionMatrix;
+      uniform mat3 normalMatrix;
+
+      // Custom uniforms
+      uniform vec3 mattColor;
+      uniform vec3 lightPosition;
+      uniform float lightIntensity;
+
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+
+      void main()
+      {
+        // Get the normal of the surface
+        vNormal = normalize(normalMatrix * normal);
+        // Local space to view space (camera space)
+        vPosition = (modelViewMatrix * vec4(position, 1.0 )).xyz;
+        // ProjectinMatrix distorts view b/c PerspectiveCamera
+        gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
+      }
+    </script>
+
+    <script id="customFragmentShader" type="x-shader/x-fragment">
+      precision highp float;
+
+      uniform sampler2D map;
+      uniform mat4 viewMatrix;
+
+      // Custom
+      uniform vec3 mattColor;
+      uniform vec3 lightPosition;
+      uniform float lightIntensity;
+
+      varying vec3 vNormal;
+      varying vec3 vPosition;
+
+      void main() {
+        vec3 N = normalize(vNormal);
+        // L = Camera space * Light pos - fragment pos (cameraSpace)
+        vec3 L = normalize((viewMatrix * vec4(lightPosition, 1.0)).xyz - vPosition);
+        // Need L direction to the light sources
+        float NdotL = clamp(dot(N,L), 0.0, 1.0);
+        // Light intensity, color, NdotL
+        vec3 adjustColor = lightIntensity * NdotL * mattColor;
+        gl_FragColor = vec4(adjustColor.rgb , 1.0);
+      }
+    </script>
+
+
+    <style>
+      body {
+        /* set margins to 0 and over to hidden, to go fullscreen */
+        margin: 0;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>Jared Johansson, ID: 2793507</h1>
+
+    <!-- Div which holds the Output -->
+    <div id="WebGL-output"></div>
+    <div id="Stats-output"></div>
+
+    <!-- Holds all code for three.js examples -->
+    <script type="text/javascript">
+      function init() {
+
+        // Get stat tracker
+        var stats = initStats();
+
+        // Holds everything to be rendered
+        var scene = new THREE.Scene();
+
+        // Defines what is shown on screen (field of view, aspect ratio, near clip, far clip)
+        var camera = new THREE.PerspectiveCamera(
+          45, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+        // Ability to control camera
+        var cameraControls = new THREE.OrbitControls(camera);
+
+        // Create a render and set the background color and size
+        var renderer = new THREE.WebGLRenderer( {antialias: true} );
+        renderer.setClearColor(new THREE.Color(0xEEEEEE), 1.0);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.type = THREE.PCFSmoothShadowMap;
+        renderer.shadowMap.enabled = true;
+
+        // Shows axes on the screen (size of axes)
+        var axes = new THREE.AxesHelper(3);
+        //scene.add(axes);
+
+        // Time to track render times
+        var clock = new THREE.Clock();
+
+
+        /* Add objects, lights, and camera to scene */
+
+        // Create a ground plane
+        var plane = new THREE.Mesh(
+          new THREE.PlaneGeometry(100, 70),
+          new THREE.MeshLambertMaterial( {color: 0xCCCCCC} )
+        );
+
+        // Set plane values and add to masked scene
+        plane.rotation.set(-0.5 * Math.PI, 0, 0);
+        plane.position.set(35, -20, 0);
+        plane.receiveShadow = true;
+        scene.add(plane);
+
+        // Create object and position it
+        var torusKnot = createTorusKnot(3, 1.2, 128, 16, 2, 3, 0,
+          new THREE.Color(0, 1, 1));
+        torusKnot.position.set(3, 10, 0);
+        scene.add(torusKnot);
+
+        // Add light source
+        var light = new THREE.DirectionalLight(0xFFFFFF, 0.7);
+        light.shadow.camera = new THREE.OrthographicCamera(-20, 20, 20, - 20, 10, 67);
+        light.position.set(-5, 35, -2);
+        light.castShadow = true;
+        light.target = torusKnot;
+        scene.add(light);
+
+        // Position camera and point camera to center of the scene
+        camera.position.set(-30, 40, 21);
+        camera.lookAt(scene.position);
+
+        // Add output of the renderer to the html element
+        document.getElementById("WebGL-output").appendChild(renderer.domElement);
+
+
+
+
+
+        /* Add custom postprocessing and shaders */
+
+        // RenderPass renders, but not to scene, effectFilm will
+        var renderPass = new THREE.RenderPass(scene, camera);
+        var effectCopy = new THREE.ShaderPass(THREE.CopyShader);
+        effectCopy.renderToScreen = true;
+        var shaderPass = new THREE.ShaderPass(THREE.CustomGrayScaleShader);
+        shaderPass.enabled = false;
+        var bitPass = new THREE.ShaderPass(THREE.CustomBitShader);
+        bitPass.enabled = false;
+
+        // Each pass will execute in sequence of addition
+        var composer = new THREE.EffectComposer(renderer);
+        composer.addPass(renderPass);
+        composer.addPass(bitPass);
+        composer.addPass(shaderPass);
+        composer.addPass(effectCopy);
+
+
+        /* GUI controls and folders */
+
+        // Dat gui control values
+        var controls = new function () {
+          this.rotationSpeed = 0.02;
+
+          // Material info
+          this.mat = 0;
+          this.color = [0, 255, 255];
+
+          // Change of material
+          this.lambert = function () { controls.changeMaterial(0) }
+          this.phong = function () { controls.changeMaterial(1) }
+          this.normals = function () { controls.changeMaterial(2) }
+          this.custom = function () { controls.changeMaterial(3) }
+
+          // TorusKnot parameters
+          this.radius = 3;
+          this.tube = 1.2;
+          this.tubeSegments = 128;
+          this.radialSegments = 16;
+          this.aroundAxis = 2;
+          this.aroundCircle = 3;
+          this.wireFrame = false;
+
+          // Grayscale shader
+          this.grayScale = false;
+          this.rPower = 0.2126;
+          this.gPower = 0.7152;
+          this.bPower = 0.0722;
+
+          // Bit shader
+          this.bitShader = false;
+          this.bitSize = 3;
+
+          // Generates new TorusKnot
+          this.buildTorus = function () {
+            // Save tor's current info
+            tor = scene.getObjectByName("torKnot");
+
+            // Build new geometry and mesh
+            torusKnot = createTorusKnot(controls.radius, controls.tube,
+              controls.tubeSegments, controls.radialSegments, controls.aroundAxis,
+              controls.aroundCircle, controls.mat, new THREE.Color(
+                controls.color[0]/255, controls.color[1]/255, controls.color[2]/255)
+            );
+
+            // Set existing pos and rotation
+            torusKnot.rotation.set(tor.rotation.x, tor.rotation.y, tor.rotation.z);
+            torusKnot.position.set(tor.position.x, tor.position.y, tor.position.z);
+
+            scene.remove(tor);
+            scene.add(torusKnot);
+
+            controls.toggleWireFrame();
+          }
+
+          this.changeColor = function () {
+            tor = scene.getObjectByName("torKnot");
+            controls.changeMaterial(controls.mat);
+          }
+
+          this.changeMaterial = function (n) {
+            controls.mat = n;
+            controls.buildTorus();
+          }
+
+          this.toggleWireFrame = function () {
+              torusKnot.children[1].visible = controls.wireFrame;
+          }
+
+          this.updateGrayscale = function () {
+            shaderPass.enabled = controls.grayScale;
+            shaderPass.uniforms.rPower.value = controls.rPower;
+            shaderPass.uniforms.gPower.value = controls.gPower;
+            shaderPass.uniforms.bPower.value = controls.bPower;
+          }
+
+          this.updateBitShader = function () {
+            bitPass.enabled = controls.bitShader;
+            bitPass.uniforms.bitSize.value = controls.bitSize;
+          }
+        }
+
+        // Defining visible controls and their ranges
+        var gui = new dat.GUI();
+        gui.add(controls, 'rotationSpeed', 0, 0.15);
+
+        var guiTorus = gui.addFolder('Torus Knot');
+        guiTorus.add(controls, 'radius', 1, 10).onChange(controls.buildTorus);
+        guiTorus.add(controls, 'tube', 0.4, 4).onChange(controls.buildTorus);
+        guiTorus.add(controls, 'tubeSegments', 64, 192).step(32).onChange(controls.buildTorus);
+        guiTorus.add(controls, 'radialSegments', 8, 24).step(4).onChange(controls.buildTorus);
+        guiTorus.add(controls, 'aroundAxis', 0, 6).step(1).onChange(controls.buildTorus);
+        guiTorus.add(controls, 'aroundCircle', 0, 9).step(1).onChange(controls.buildTorus);
+        guiTorus.add(controls, 'wireFrame').onChange(controls.toggleWireFrame);
+        guiTorus.addColor(controls, 'color').onFinishChange(controls.changeColor);
+
+        var guiGrayscale = gui.addFolder('GrayScale');
+        guiGrayscale.add(controls, 'grayScale').onChange(controls.updateGrayscale);
+        guiGrayscale.add(controls, 'rPower', 0, 1).onChange(controls.updateGrayscale);
+        guiGrayscale.add(controls, 'gPower', 0, 1).onChange(controls.updateGrayscale);
+        guiGrayscale.add(controls, 'bPower', 0, 1).onChange(controls.updateGrayscale);
+
+        var guiBitShader = gui.addFolder('Bit Color');
+        guiBitShader.add(controls, 'bitShader').onChange(controls.updateBitShader);
+        guiBitShader.add(controls, 'bitSize', 2, 24).step(1).onChange(controls.updateBitShader);
+
+        var guiMatChanger = gui.addFolder('Materials');
+        guiMatChanger.add(controls, 'lambert');
+        guiMatChanger.add(controls, 'phong');
+        guiMatChanger.add(controls, 'normals');
+        guiMatChanger.add(controls, 'custom');
+
+        render();
+
+
+        /* Custom functions */
+
+        // Handles rendering of scene and animations
+        function render() {
+          stats.update();
+          cameraControls.update();
+
+          // Amount of time since last render
+          var delta = clock.getDelta();
+
+          // Rotate object around its axes
+          torusKnot.rotation.x += controls.rotationSpeed;
+          torusKnot.rotation.y += controls.rotationSpeed;
+          torusKnot.rotation.z += controls.rotationSpeed;
+
+          // Every render it requests a new render from the browser
+          requestAnimationFrame(render);
+          composer.render(delta);
+        }
+
+        function findMaterial (n, color) {
+          var hex = color.getHex();
+          switch (n) {
+            // Lambert
+            case 0:
+              var mat = new THREE.MeshLambertMaterial( {color: hex} );
+              break;
+            // Phong
+            case 1:
+              var mat = new THREE.MeshPhongMaterial( {color: hex} );
+              break;
+            // Normalize faces
+            case 2:
+              var mat = new THREE.RawShaderMaterial( {
+                side: THREE.DoubleSide,
+                fragmentShader: document.getElementById('normalFragmentShader').textContent,
+                vertexShader: document.getElementById('normalVertexShader').textContent
+              });
+              break;
+            // custom shader
+            case 3:
+              var mat = new THREE.RawShaderMaterial({
+                side: THREE.DoubleSide,
+                uniforms: {
+                  mattColor: { type: 'v3', value: new THREE.Vector3(color.r, color.g, color.b) },
+                  lightPosition: { type: 'v3', value: new THREE.Vector3(-5, 35, -2) },
+                  lightIntensity: { type: 'f', value: 0.7 }
+                },
+                fragmentShader: document.getElementById('customFragmentShader').textContent,
+                vertexShader: document.getElementById('customVertexShader').textContent
+              });
+              break;
+            default:
+              // Regular color
+              console.log("Couldn't find material");
+              var mat = new THREE.MeshLambertMaterial( {color: hex} );
+          }
+
+          return [mat,
+            new THREE.MeshBasicMaterial( {color: 0x000000, wireframe: true} )
+            ];
+        }
+
+        // Creates a torus knot
+        function createTorusKnot(rad, tub, tubSeg, radSeg, p, q, n, color) {
+          var torusKnotGeometry = new THREE.TorusKnotGeometry(rad, tub, tubSeg, radSeg, p, q);
+          var torusKnotMaterials = findMaterial(n, color);
+          var torusKnot = new THREE.SceneUtils.createMultiMaterialObject(
+            torusKnotGeometry, torusKnotMaterials);
+
+          torusKnot.children.forEach(function(e) {e.castShadow = true} );
+          torusKnot.children[1].visible = false;
+          torusKnot.name = "torKnot";
+
+          return torusKnot;
+        }
+
+        // Creates the stat tracker
+        function initStats() {
+          var stats = new Stats();
+
+          // 0: fps, 1: ms to draw frame
+          stats.setMode(0);
+
+          // Align top left
+          stats.domElement.style.position = 'absolute';
+          stats.domElement.style.left = '0px';
+          stats.domElement.style.top = '80px';
+
+          document.getElementById("Stats-output").appendChild(stats.domElement);
+          return stats;
+        }
+      }
+
+      window.onload = init;
+    </script>
+  </body>
+</html>
